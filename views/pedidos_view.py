@@ -1,86 +1,124 @@
 import tkinter as tk
-from tkinter import ttk, filedialog
+from tkinter import ttk, messagebox
 from datetime import date
-import csv
-from models import listar_clientes, inserir_pedido, listar_pedidos
-from utils import erro, info
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
+import models
 
-class PedidosFrame(ttk.Frame):
-    """Lista e filtra pedidos"""
-    def __init__(self, master):
-        super().__init__(master)
-        self.pack(fill="both", expand=True)
-        self.criar_widgets()
-        self.carregar_pedidos()
 
-    def criar_widgets(self):
-        filtro_frame = ttk.Frame(self)
-        filtro_frame.pack(fill="x", pady=5)
+class PedidosView(tk.Frame):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        ttk.Label(filtro_frame, text="De:").pack(side="left")
-        self.var_ini = tk.StringVar()
-        ttk.Entry(filtro_frame, textvariable=self.var_ini, width=10).pack(side="left", padx=2)
-        ttk.Label(filtro_frame, text="Até:").pack(side="left")
-        self.var_fim = tk.StringVar()
-        ttk.Entry(filtro_frame, textvariable=self.var_fim, width=10).pack(side="left", padx=2)
-        ttk.Button(filtro_frame, text="Filtrar", command=self.carregar_pedidos).pack(side="left", padx=5)
+        # Botão para criar novo pedido
+        tk.Button(self, text="Novo Pedido", command=self.abrir_criacao_pedido).pack(pady=20)
 
-        botoes = ttk.Frame(self)
-        botoes.pack(fill="x", pady=5)
-        ttk.Button(botoes, text="Novo Pedido", command=self.novo_pedido).pack(side="left", padx=2)
-        ttk.Button(botoes, text="Exportar CSV", command=lambda: self.exportar("csv")).pack(side="left", padx=2)
-        ttk.Button(botoes, text="Exportar PDF", command=lambda: self.exportar("pdf")).pack(side="left", padx=2)
+        tk.Label(self, text="Para visualizar pedidos, implemente a listagem aqui").pack()
 
-        self.tree = ttk.Treeview(self, columns=("id", "cliente", "data", "total"), show="headings")
-        for c in ("id", "cliente", "data", "total"):
-            self.tree.heading(c, text=c.capitalize())
-        self.tree.pack(fill="both", expand=True)
+    def abrir_criacao_pedido(self):
+        CriarPedidoWindow(self)
 
-    def carregar_pedidos(self):
-        for row in self.tree.get_children():
-            self.tree.delete(row)
-        ini, fim = self.var_ini.get().strip(), self.var_fim.get().strip()
-        pedidos = listar_pedidos(ini if ini else None, fim if fim else None)
-        if pedidos:
-            for p in pedidos:
-                self.tree.insert("", "end", values=p)
 
-    def novo_pedido(self):
-        PedidoForm(self)
+class CriarPedidoWindow(tk.Toplevel):
+    def __init__(self, parent):
+        super().__init__()
+        self.title("Novo Pedido")
+        self.geometry("500x400")
 
-    def exportar(self, tipo):
-        sel = self.tree.selection()
-        if not sel:
-            erro("Selecione um pedido para exportar.")
+        # Seleção de Cliente
+        frame_top = tk.Frame(self)
+        frame_top.pack(fill=tk.X, padx=10, pady=5)
+
+        tk.Label(frame_top, text="Cliente:").pack(side=tk.LEFT)
+
+        # Carregar clientes para o Combobox
+        self.clientes_map = {f"{c[1]} ({c[0]})": c[0] for c in models.listar_clientes()}
+        self.cb_clientes = ttk.Combobox(frame_top, values=list(self.clientes_map.keys()))
+        self.cb_clientes.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+
+        tk.Label(frame_top, text="Data:").pack(side=tk.LEFT)
+        self.entry_data = tk.Entry(frame_top, width=10)
+        self.entry_data.insert(0, str(date.today()))
+        self.entry_data.pack(side=tk.LEFT)
+
+        # Adicionar Itens
+        frame_item = tk.LabelFrame(self, text="Adicionar Produto")
+        frame_item.pack(fill=tk.X, padx=10, pady=5)
+
+        tk.Label(frame_item, text="Produto:").grid(row=0, column=0)
+        self.entry_prod = tk.Entry(frame_item)
+        self.entry_prod.grid(row=0, column=1)
+
+        tk.Label(frame_item, text="Qtd:").grid(row=0, column=2)
+        self.entry_qtd = tk.Entry(frame_item, width=5)
+        self.entry_qtd.grid(row=0, column=3)
+
+        tk.Label(frame_item, text="Preço:").grid(row=0, column=4)
+        self.entry_preco = tk.Entry(frame_item, width=8)
+        self.entry_preco.grid(row=0, column=5)
+
+        tk.Button(frame_item, text="+", command=self.add_item).grid(row=0, column=6, padx=5)
+
+        # Lista de Itens (Treeview temporária)
+        self.tree = ttk.Treeview(self, columns=("Produto", "Qtd", "Preco", "Subtotal"), show="headings", height=5)
+        self.tree.heading("Produto", text="Produto")
+        self.tree.heading("Qtd", text="Qtd")
+        self.tree.heading("Preco", text="Preço Unit.")
+        self.tree.heading("Subtotal", text="Subtotal")
+        self.tree.pack(fill=tk.BOTH, expand=True, padx=10)
+
+        # Total
+        self.lbl_total = tk.Label(self, text="Total: R$ 0.00", font=("Arial", 12, "bold"))
+        self.lbl_total.pack(pady=5)
+
+        # Ação Final
+        tk.Button(self, text="Finalizar Pedido", command=self.salvar_pedido, bg="#dddddd").pack(pady=10)
+
+        self.itens_temporarios = []
+
+    def add_item(self):
+        prod = self.entry_prod.get()
+        try:
+            qtd = int(self.entry_qtd.get())
+            preco = float(self.entry_preco.get())
+        except ValueError:
+            messagebox.showerror("Erro", "Quantidade e Preço devem ser números.")
             return
-        pedido = self.tree.item(sel[0])["values"]
-        pedido_id, cliente, data, total = pedido
 
-        if tipo == "csv":
-            file = filedialog.asksaveasfilename(defaultextension=".csv",
-                                                filetypes=[("CSV", "*.csv")])
-            if not file:
-                return
-            with open(file, "w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow(["Pedido ID", "Cliente", "Data", "Total"])
-                writer.writerow(pedido)
-            info(f"Pedido exportado para {file}")
+        if not prod:
+            messagebox.showerror("Erro", "Nome do produto obrigatório.")
+            return
 
-        elif tipo == "pdf":
-            file = filedialog.asksaveasfilename(defaultextension=".pdf",
-                                                filetypes=[("PDF", "*.pdf")])
-            if not file:
-                return
-            c = canvas.Canvas(file, pagesize=A4)
-            c.setFont("Helvetica-Bold", 14)
-            c.drawString(100, 800, "Resumo de Pedido")
-            c.setFont("Helvetica", 12)
-            c.drawString(100, 770, f"Pedido: {pedido_id}")
-            c.drawString(100, 750, f"Cliente: {cliente}")
-            c.drawString(100, 730, f"Data: {data}")
-            c.drawString(100, 710, f"Total: R$ {total:.2f}")
-            c.save()
-            info(f"PDF salvo em {file}")
+        subtotal = qtd * preco
+        self.itens_temporarios.append((prod, qtd, preco))
+        self.tree.insert("", tk.END, values=(prod, qtd, f"{preco:.2f}", f"{subtotal:.2f}"))
+        self.atualizar_total()
+
+        # Limpar campos
+        self.entry_prod.delete(0, tk.END)
+        self.entry_qtd.delete(0, tk.END)
+        self.entry_preco.delete(0, tk.END)
+        self.entry_prod.focus()
+
+    def atualizar_total(self):
+        total = sum(i[1] * i[2] for i in self.itens_temporarios)
+        self.lbl_total.config(text=f"Total: R$ {total:.2f}")
+
+    def salvar_pedido(self):
+        cliente_str = self.cb_clientes.get()
+        if cliente_str not in self.clientes_map:
+            messagebox.showerror("Erro", "Selecione um cliente válido.")
+            return
+        if not self.itens_temporarios:
+            messagebox.showerror("Erro", "O pedido precisa de pelo menos um item.")
+            return
+
+        cliente_id = self.clientes_map[cliente_str]
+        data_ped = self.entry_data.get()
+        total = sum(i[1] * i[2] for i in self.itens_temporarios)
+
+        try:
+            models.salvar_pedido_completo(cliente_id, data_ped, total, self.itens_temporarios)
+            messagebox.showinfo("Sucesso", "Pedido salvo com sucesso!")
+            self.destroy()
+        except Exception as e:
+            messagebox.showerror("Erro", f"Falha ao salvar: {e}")

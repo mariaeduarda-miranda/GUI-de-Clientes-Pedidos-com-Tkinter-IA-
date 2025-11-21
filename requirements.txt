@@ -1,2 +1,2 @@
-tk
-sqlite3
+reportlab~=4.4.4
+openai~=2.8.1
